@@ -2,7 +2,7 @@
 build:
   # Path to main.go file.
   # Default is `main.go`
-  main: ./cmd/tm.go
+  main: ./cmd/qlrx.go
   binary: qlrx
 
   env:
