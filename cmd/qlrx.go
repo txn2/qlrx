@@ -7,18 +7,35 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"time"
+
+	"github.com/txn2/qlrx"
 
 	"github.com/txn2/micro"
 	"go.uber.org/zap"
 )
 
 var (
-	tcpIpEnv          = getEnv("TCP_IP", "127.0.0.1")
-	tcpPortEnv        = getEnv("TCP_PORT", "3000")
-	tcpReadTimeoutEnv = getEnv("TCP_READ_TIMEOUT", "10")
-	tcpBufferSizeEnv  = getEnv("TCP_BUFFER_SIZE", "1600")
+	tcpIpEnv            = getEnv("TCP_IP", "127.0.0.1")
+	tcpPortEnv          = getEnv("TCP_PORT", "3000")
+	tcpReadTimeoutEnv   = getEnv("TCP_READ_TIMEOUT", "10")
+	tcpBufferSizeEnv    = getEnv("TCP_BUFFER_SIZE", "1600")
+	provisionServiceEnv = getEnv("PROVISION_SERVICE", "http://api-provision:8070")
+	modelServiceEnv     = getEnv("MODEL_SERVICE", "http://api-tm:8070")
+	ingestTsServiceEnv  = getEnv("INGEST_TS_SERVICE", "http://rxtx-ts:80")
+	ingestIdServiceEnv  = getEnv("INGEST_ID_SERVICE", "http://rxtx-id:80")
+	assetIdPrefixEnv    = getEnv("ASSET_ID_PREFIX", "imei-")
 )
+
+// MsgResp is a response to messages
+type MsgResp struct {
+	Heartbeat bool
+	Protocol  string
+	Count     string
+	Type      string
+	Id        string
+}
 
 func main() {
 	tcpReadTimeoutEnvInt, err := strconv.Atoi(tcpReadTimeoutEnv)
@@ -31,10 +48,17 @@ func main() {
 		fmt.Printf("TCP buffer size must be an integer, parse error: " + err.Error())
 	}
 
-	tcpIp := flag.String("tcpIp", tcpIpEnv, "TCP listener IP address.")
-	tcpPort := flag.String("tcpPort", tcpPortEnv, "TCP listener port.")
-	tcpReadTimeout := flag.Int("tcpReadTimeout", tcpReadTimeoutEnvInt, "TCP listener read timeout.")
-	tcpBuffer := flag.Int("tcpBufferSize", tcpBufferSizeEnvInt, "TCP buffer size in bytes.")
+	var (
+		tcpIp            = flag.String("tcpIp", tcpIpEnv, "TCP listener IP address.")
+		tcpPort          = flag.String("tcpPort", tcpPortEnv, "TCP listener port.")
+		tcpReadTimeout   = flag.Int("tcpReadTimeout", tcpReadTimeoutEnvInt, "TCP listener read timeout.")
+		tcpBuffer        = flag.Int("tcpBufferSize", tcpBufferSizeEnvInt, "TCP buffer size in bytes.")
+		assetIdPrefix    = flag.String("assetIdPrefix", assetIdPrefixEnv, "Asset ID prefix.")
+		provisionService = flag.String("provisionService", provisionServiceEnv, "Provisioning service.")
+		modelService     = flag.String("modelService", modelServiceEnv, "Model service.")
+		ingestTsService  = flag.String("ingestTsService", ingestTsServiceEnv, "Ingest time-series message service.")
+		ingestIdService  = flag.String("ingestIdService", ingestIdServiceEnv, "Ingest id-based message service.")
+	)
 
 	serverCfg, _ := micro.NewServerCfg("qlrx")
 	server := micro.NewServer(serverCfg)
@@ -43,6 +67,11 @@ func main() {
 	go func() {
 		server.Run()
 	}()
+
+	qlApi, err := qlrx.NewApi(&qlrx.Config{
+		Logger:     server.Logger,
+		HttpClient: server.Client,
+	})
 
 	// Handle TCP connection
 	tcpHandler := func(c net.Conn) {
@@ -59,8 +88,91 @@ func main() {
 			return
 		}
 
-		msg := buf[:bufLen]
-		server.Logger.Info("Message received", zap.ByteString("message", msg))
+		msgData := buf[:bufLen]
+		server.Logger.Info("Messages received", zap.ByteString("message", msgData))
+
+		// may receive multiple messages
+		msgs := strings.Split(strings.TrimSpace(string(msgData)), "$")
+		msgResp := make([]MsgResp, len(msgs)-1)
+
+		// parse each message
+		for i, msg := range msgs {
+			// split each message
+			elms := strings.Split(msg, ",")
+			if len(elms) < 3 {
+				continue
+			}
+
+			// index 0 = message type
+			msgType := strings.Split(elms[0], ":")
+			if len(msgType) != 2 {
+				server.Logger.Warn("Unknown message type", zap.String("type", elms[0]))
+				continue
+			}
+
+			// index 1 = protocol version
+			msgResp[i].Type = msgType[1]
+			msgResp[i].Protocol = elms[1]
+			msgResp[i].Id = elms[2]
+			msgResp[i].Count = elms[len(elms)-1]
+
+			server.Logger.Debug("Lookup",
+				zap.Int("elms", len(elms)),
+				zap.String("id", msgResp[i].Id),
+				zap.String("type", msgResp[i].Type),
+				zap.String("protocol", msgResp[i].Protocol),
+				zap.String("count", msgResp[i].Count),
+			)
+
+			// Get asset
+			asset, err := qlApi.GetAsset(*provisionService, *assetIdPrefix, msgResp[i].Id)
+			if err != nil {
+				server.Logger.Warn("Unable to retrieve asset related to message.", zap.Error(err))
+				continue
+			}
+
+			modelSuffix := strings.ToLower("_" + msgResp[i].Type + "_" + msgResp[i].Protocol)
+
+			// for every account / model assignment in asset
+			for _, a := range asset.AccountModels {
+				modelId := a.ModelId + modelSuffix
+
+				server.Logger.Debug("Route message for asset",
+					zap.String("account", a.AccountId),
+					zap.String("base_model", a.ModelId),
+					zap.String("model", modelId))
+
+				// Get model
+				// [base_model]_[MSG_TYPE]_[PROTOCOL]
+				model, err := qlApi.GetModel(*modelService, a.AccountId, modelId)
+				if err != nil {
+					server.Logger.Warn("Unable to retrieve model related to asset.", zap.Error(err))
+					continue
+				}
+
+				// convert elms to model-based payload
+				payloadJson := qlApi.Package(elms, model)
+
+				// record stored by the id and by time-series
+				for _, service := range []string{*ingestTsService, *ingestIdService} {
+					url := fmt.Sprintf(
+						"%s/rx/%s/%s/%s/device",
+						service,
+						a.AccountId,
+						model.MachineName,
+						msgResp[i].Id,
+					)
+					err = qlApi.Inject(url, payloadJson)
+					if err != nil {
+						server.Logger.Warn("Could not inject payload", zap.String("url", url), zap.Error(err))
+					}
+					server.Logger.Info("Injected Message", zap.String("url", url))
+					server.Logger.Debug("Payload", zap.ByteString("payload", payloadJson))
+				}
+			}
+		}
+		// TODO return ACK or RETURN queues commands
+
 	}
 
 	// Listen for TCP connections
