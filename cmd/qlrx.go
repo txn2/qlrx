@@ -170,9 +170,18 @@ func main() {
 					server.Logger.Debug("Payload", zap.ByteString("payload", payloadJson))
 				}
 			}
-		}
-		// TODO return ACK or RETURN queues commands
 
+			if msgResp[i].Count != "" {
+				sendAck := fmt.Sprintf("+SACK:%s$", msgResp[i].Count)
+				server.Logger.Debug("TCP Write", zap.String("ACK", sendAck))
+				_, err = c.Write([]byte(sendAck))
+				if err != nil {
+					server.Logger.Error("TCP Write Error", zap.Error(err))
+				}
+			}
+
+			// TODO RETURN queued commands
+		}
 	}
 
 	// Listen for TCP connections
