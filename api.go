@@ -65,6 +65,11 @@ func (a *Api) Package(elements []string, model *tm.Model) []byte {
 		// should the field be pased and with the index will be in bounds?
 		if field.Parse == true && field.Index < nOfElms {
 
+			// omit empty elements
+			if elements[field.Index] == "" {
+				continue
+			}
+
 			// does this field belong to a group?
 			if field.Group != "" {
 				// create a spot for the field group if it does not exist.
@@ -75,9 +80,8 @@ func (a *Api) Package(elements []string, model *tm.Model) []byte {
 				fieldGroups[field.Group][field.MachineName] = elements[field.Index]
 			}
 
+			elmMap[field.MachineName] = elements[field.Index]
 		}
-
-		elmMap[field.MachineName] = elements[field.Index]
 	}
 
 	// add field groups
