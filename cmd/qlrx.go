@@ -10,9 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/txn2/qlrx"
-
 	"github.com/txn2/micro"
+	"github.com/txn2/qlrx"
 	"go.uber.org/zap"
 )
 

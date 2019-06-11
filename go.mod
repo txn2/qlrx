@@ -9,7 +9,7 @@ require (
 	github.com/konsorten/go-windows-terminal-sequences v1.0.2 // indirect
 	github.com/sirupsen/logrus v1.4.1 // indirect
 	github.com/stretchr/objx v0.2.0 // indirect
-	github.com/txn2/micro v0.0.6
+	github.com/txn2/micro v0.0.8
 	github.com/txn2/provision v0.1.1
 	github.com/txn2/tm v0.1.1
 	go.uber.org/zap v1.9.1
