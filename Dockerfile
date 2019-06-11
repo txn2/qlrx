@@ -1,4 +1,4 @@
-FROM scratch
+FROM alpine:3.9.4
 ENV PATH=/bin
 
 COPY qlrx /bin/
