@@ -10,9 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/txn2/provision"
-
 	"github.com/txn2/micro"
+	"github.com/txn2/provision"
 	"github.com/txn2/qlrx"
 	"go.uber.org/zap"
 )
@@ -134,12 +133,10 @@ func main() {
 				continue
 			}
 
-			modelSuffix := strings.ToLower("_" + msgResp[i].Type + "_" + msgResp[i].Protocol)
-
 			processModels := func(modelAssoc *[]provision.AccountModel, systemModel bool) {
 				// for every account / model assignment in asset
 				for _, a := range *modelAssoc {
-					modelId := a.ModelId + modelSuffix
+					modelId := a.ModelId
 
 					server.Logger.Debug("Route message for asset",
 						zap.String("account", a.AccountId),
