@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/txn2/provision"
+
 	"github.com/txn2/micro"
 	"github.com/txn2/qlrx"
 	"go.uber.org/zap"
@@ -25,6 +27,7 @@ var (
 	ingestTsServiceEnv  = getEnv("INGEST_TS_SERVICE", "http://rxtx-ts:80")
 	ingestIdServiceEnv  = getEnv("INGEST_ID_SERVICE", "http://rxtx-id:80")
 	assetIdPrefixEnv    = getEnv("ASSET_ID_PREFIX", "imei-")
+	systemPrefixEnv     = getEnv("SYSTEM_PREFIX", "system_")
 )
 
 // MsgResp is a response to messages
@@ -53,6 +56,7 @@ func main() {
 		tcpReadTimeout   = flag.Int("tcpReadTimeout", tcpReadTimeoutEnvInt, "TCP listener read timeout.")
 		tcpBuffer        = flag.Int("tcpBufferSize", tcpBufferSizeEnvInt, "TCP buffer size in bytes.")
 		assetIdPrefix    = flag.String("assetIdPrefix", assetIdPrefixEnv, "Asset ID prefix.")
+		systemPrefix     = flag.String("systemPrefix", systemPrefixEnv, "Prefix for system indices.")
 		provisionService = flag.String("provisionService", provisionServiceEnv, "Provisioning service.")
 		modelService     = flag.String("modelService", modelServiceEnv, "Model service.")
 		ingestTsService  = flag.String("ingestTsService", ingestTsServiceEnv, "Ingest time-series message service.")
@@ -132,43 +136,57 @@ func main() {
 
 			modelSuffix := strings.ToLower("_" + msgResp[i].Type + "_" + msgResp[i].Protocol)
 
-			// for every account / model assignment in asset
-			for _, a := range asset.AccountModels {
-				modelId := a.ModelId + modelSuffix
+			processModels := func(modelAssoc *[]provision.AccountModel, systemModel bool) {
+				// for every account / model assignment in asset
+				for _, a := range *modelAssoc {
+					modelId := a.ModelId + modelSuffix
 
-				server.Logger.Debug("Route message for asset",
-					zap.String("account", a.AccountId),
-					zap.String("base_model", a.ModelId),
-					zap.String("model", modelId))
+					server.Logger.Debug("Route message for asset",
+						zap.String("account", a.AccountId),
+						zap.String("base_model", a.ModelId),
+						zap.Bool("system_model", systemModel),
+						zap.String("model", modelId))
 
-				// Get model
-				// [base_model]_[MSG_TYPE]_[PROTOCOL]
-				model, err := qlApi.GetModel(*modelService, a.AccountId, modelId)
-				if err != nil {
-					server.Logger.Warn("Unable to retrieve model related to asset.", zap.Error(err))
-					continue
-				}
-
-				// convert elms to model-based payload
-				payloadJson := qlApi.Package(elms, model)
-
-				// record stored by the id and by time-series
-				for _, service := range []string{*ingestTsService, *ingestIdService} {
-					url := fmt.Sprintf(
-						"%s/rx/%s/%s/%s/device",
-						service,
-						a.AccountId,
-						model.MachineName,
-						msgResp[i].Id,
-					)
-					err = qlApi.Inject(url, payloadJson)
-					if err != nil {
-						server.Logger.Warn("Could not inject payload", zap.String("url", url), zap.Error(err))
+					modelPrefix := a.AccountId
+					if systemModel {
+						modelPrefix = *systemPrefix
 					}
-					server.Logger.Info("Injected Message", zap.String("url", url))
-					server.Logger.Debug("Payload", zap.ByteString("payload", payloadJson))
+
+					// Get model
+					// [base_model]_[MSG_TYPE]_[PROTOCOL]
+					model, err := qlApi.GetModel(*modelService, modelPrefix, modelId)
+					if err != nil {
+						server.Logger.Warn("Unable to retrieve model related to asset.", zap.Error(err))
+						continue
+					}
+
+					// convert elms to model-based payload
+					payloadJson := qlApi.Package(elms, model)
+
+					// record stored by the id and by time-series
+					for _, service := range []string{*ingestTsService, *ingestIdService} {
+						url := fmt.Sprintf(
+							"%s/rx/%s/%s/%s/device",
+							service,
+							a.AccountId,
+							model.MachineName,
+							msgResp[i].Id,
+						)
+						err = qlApi.Inject(url, payloadJson)
+						if err != nil {
+							server.Logger.Warn("Could not inject payload", zap.String("url", url), zap.Error(err))
+						}
+						server.Logger.Info("Injected Message", zap.String("url", url))
+						server.Logger.Debug("Payload", zap.ByteString("payload", payloadJson))
+					}
 				}
 			}
+
+			// Account Models
+			processModels(&asset.AccountModels, false)
+
+			// System Models
+			processModels(&asset.SystemModels, true)
 
 			if msgResp[i].Count != "" {
 				sendAck := fmt.Sprintf("+SACK:%s$", msgResp[i].Count)
