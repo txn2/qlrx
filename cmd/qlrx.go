@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/txn2/micro"
-	"github.com/txn2/provision"
 	"github.com/txn2/qlrx"
 	"go.uber.org/zap"
 )
@@ -133,57 +132,49 @@ func main() {
 				continue
 			}
 
-			processModels := func(modelAssoc *[]provision.AccountModel, systemModel bool) {
-				// for every account / model assignment in asset
-				for _, a := range *modelAssoc {
-					modelId := a.ModelId
+			// for every account / model assignment in asset
+			for _, a := range asset.Routes {
+				modelId := a.ModelId
 
-					server.Logger.Debug("Route message for asset",
-						zap.String("account", a.AccountId),
-						zap.String("base_model", a.ModelId),
-						zap.Bool("system_model", systemModel),
-						zap.String("model", modelId))
+				server.Logger.Debug("Route message for asset",
+					zap.String("account", a.AccountId),
+					zap.String("base_model", a.ModelId),
+					zap.String("type", a.Type),
+					zap.String("model", modelId))
 
-					modelPrefix := a.AccountId
-					if systemModel {
-						modelPrefix = *systemPrefix
-					}
+				modelPrefix := a.AccountId
+				if a.Type == "system" {
+					modelPrefix = *systemPrefix
+				}
 
-					// Get model
-					// [base_model]_[MSG_TYPE]_[PROTOCOL]
-					model, err := qlApi.GetModel(*modelService, modelPrefix, modelId)
+				// Get model
+				// [base_model]_[MSG_TYPE]_[PROTOCOL]
+				model, err := qlApi.GetModel(*modelService, modelPrefix, modelId)
+				if err != nil {
+					server.Logger.Warn("Unable to retrieve model related to asset.", zap.Error(err))
+					continue
+				}
+
+				// convert elms to model-based payload
+				payloadJson := qlApi.Package(elms, model)
+
+				// record stored by the id and by time-series
+				for _, service := range []string{*ingestTsService, *ingestIdService} {
+					url := fmt.Sprintf(
+						"%s/rx/%s/%s/%s/device",
+						service,
+						a.AccountId,
+						model.MachineName,
+						msgResp[i].Id,
+					)
+					err = qlApi.Inject(url, payloadJson)
 					if err != nil {
-						server.Logger.Warn("Unable to retrieve model related to asset.", zap.Error(err))
-						continue
+						server.Logger.Warn("Could not inject payload", zap.String("url", url), zap.Error(err))
 					}
-
-					// convert elms to model-based payload
-					payloadJson := qlApi.Package(elms, model)
-
-					// record stored by the id and by time-series
-					for _, service := range []string{*ingestTsService, *ingestIdService} {
-						url := fmt.Sprintf(
-							"%s/rx/%s/%s/%s/device",
-							service,
-							a.AccountId,
-							model.MachineName,
-							msgResp[i].Id,
-						)
-						err = qlApi.Inject(url, payloadJson)
-						if err != nil {
-							server.Logger.Warn("Could not inject payload", zap.String("url", url), zap.Error(err))
-						}
-						server.Logger.Info("Injected Message", zap.String("url", url))
-						server.Logger.Debug("Payload", zap.ByteString("payload", payloadJson))
-					}
+					server.Logger.Info("Injected Message", zap.String("url", url))
+					server.Logger.Debug("Payload", zap.ByteString("payload", payloadJson))
 				}
 			}
-
-			// Account Models
-			processModels(&asset.AccountModels, false)
-
-			// System Models
-			processModels(&asset.SystemModels, true)
 
 			if msgResp[i].Count != "" {
 				sendAck := fmt.Sprintf("+SACK:%s$", msgResp[i].Count)
