@@ -111,7 +111,7 @@ func main() {
 				}
 
 				// convert second elm to int
-				idx, err := strconv.Atoi(condElms[1])
+				idx, err := strconv.Atoi(condElms[0])
 				if err != nil {
 					server.Logger.Error("can not convert qlrx_idx_regex idx to int. (should be idx|regex)",
 						zap.String("condition", cond.Condition),
