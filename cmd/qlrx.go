@@ -104,6 +104,7 @@ func main() {
 				condElms := strings.Split(cond.Condition, "|")
 				if len(condElms) != 2 {
 					server.Logger.Error("qlrx_idx_regex has the wrong number of elements, should be 2 (idx|regex)",
+						zap.String("parser", cond.Parser),
 						zap.String("condition", cond.Condition),
 						zap.Strings("condition_elms", condElms),
 					)
@@ -146,21 +147,33 @@ func main() {
 			}
 
 			// element greater than
-			if cond.Parser == "qlrx_idx_count_gt" || cond.Parser == "qlrx_idx_count_lt" {
+			if cond.Parser == "qlrx_idx_count_eq" || cond.Parser == "qlrx_idx_count_gte" || cond.Parser == "qlrx_idx_count_lte" {
 				// convert second elm to int
 				idx, err := strconv.Atoi(cond.Condition)
 				if err != nil {
 					server.Logger.Error("condition must be in integer for qlrx_idx_count_gt and qlrx_idx_count_lt.",
+						zap.String("parser", cond.Parser),
 						zap.String("condition", cond.Condition),
 					)
 					return false
 				}
 
-				if cond.Parser == "qlrx_idx_count_gte" && len(*elms) <= idx {
+				server.Logger.Info("Checking element count",
+					zap.String("parser", cond.Parser),
+					zap.String("condition", cond.Condition),
+					zap.Int("idx", idx),
+					zap.Int("elms", len(*elms)),
+				)
+
+				if cond.Parser == "qlrx_idx_count_eq" && len(*elms) != idx {
 					return false
 				}
 
-				if cond.Parser == "qlrx_idx_count_lte" && len(*elms) >= idx {
+				if cond.Parser == "qlrx_idx_count_gt" && len(*elms) < idx {
+					return false
+				}
+
+				if cond.Parser == "qlrx_idx_count_lt" && len(*elms) > idx {
 					return false
 				}
 
@@ -242,7 +255,7 @@ func main() {
 
 				// if the route has conditions check them here and bail if any are
 				// false.
-				if conditionParser(&msg, &elms, a.Conditions) != true {
+				if conditionParser(&msg, &elms, a.Conditions) == false {
 					server.Logger.Debug("Message did not meet route condition.")
 					continue
 				}
