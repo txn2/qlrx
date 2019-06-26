@@ -6,9 +6,12 @@ import (
 	"io"
 	"net"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/txn2/provision"
 
 	"github.com/txn2/micro"
 	"github.com/txn2/qlrx"
@@ -74,6 +77,84 @@ func main() {
 		HttpClient: server.Client,
 	})
 
+	conditionParser := func(msg *string, elms *[]string, conditions []provision.ConditionCfg) bool {
+		for _, cond := range conditions {
+
+			// message regex
+			if cond.Parser == "qlrx_msg_regex" {
+				re, err := regexp.Compile(cond.Condition)
+				if err != nil {
+					server.Logger.Error("Could not compile regex for qlrx_msg_regex.", zap.Error(err))
+					return false
+				}
+
+				if re.MatchString(*msg) == false {
+					return false
+				}
+
+				continue
+			}
+
+			// index regex
+			if cond.Parser == "qlrx_idx_regex" {
+				// first split the condition
+				condElms := strings.Split(cond.Condition, "|")
+				if len(condElms) != 2 {
+					server.Logger.Error("qlrx_idx_regex has the wrong number of elements, should be 2 (idx|regex)")
+					return false
+				}
+
+				// convert second elm to int
+				idx, err := strconv.Atoi(condElms[1])
+				if err != nil {
+					server.Logger.Error("can not convert qlrx_idx_regex idx to int. (should be idx|regex)")
+					return false
+				}
+
+				// is index in range?
+				if idx > len(*elms) {
+					server.Logger.Error("qlrx_idx_regex - index is greater than the number of elements in the message.")
+					return false
+				}
+
+				re, err := regexp.Compile(condElms[1])
+				if err != nil {
+					server.Logger.Error("Could not compile regex for qlrx_idx_regex.", zap.Error(err))
+					return false
+				}
+
+				if re.MatchString(*msg) == false {
+					return false
+				}
+
+				continue
+			}
+
+			// element greater than
+			if cond.Parser == "qlrx_idx_count_gt" || cond.Parser == "qlrx_idx_count_lt" {
+				// convert second elm to int
+				idx, err := strconv.Atoi(cond.Condition)
+				if err != nil {
+					server.Logger.Error("condition must be in integer for qlrx_idx_count_gt and qlrx_idx_count_lt.")
+					return false
+				}
+
+				if cond.Parser == "qlrx_idx_count_gte" && len(*elms) <= idx {
+					return false
+				}
+
+				if cond.Parser == "qlrx_idx_count_lte" && len(*elms) >= idx {
+					return false
+				}
+
+			}
+
+		}
+
+		// if no valid parser conditions returned false
+		return true
+	}
+
 	// Handle TCP connection
 	tcpHandler := func(c net.Conn) {
 		defer c.Close()
@@ -132,15 +213,24 @@ func main() {
 				continue
 			}
 
-			// for every account / model assignment in asset
+			// ROUTES for every account / model assignment in asset
 			for _, a := range asset.Routes {
+
+				// if the route has conditions check them here and bail if any are
+				// false.
+				if conditionParser(&msg, &elms, a.Conditions) != true {
+					server.Logger.Debug("Message did not meet route condition.")
+					continue
+				}
+
 				modelId := a.ModelId
 
 				server.Logger.Debug("Route message for asset",
 					zap.String("account", a.AccountId),
 					zap.String("base_model", a.ModelId),
 					zap.String("type", a.Type),
-					zap.String("model", modelId))
+					zap.String("model", modelId),
+				)
 
 				modelPrefix := a.AccountId
 				if a.Type == "system" {
