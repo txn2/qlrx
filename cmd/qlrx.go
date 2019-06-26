@@ -84,7 +84,10 @@ func main() {
 			if cond.Parser == "qlrx_msg_regex" {
 				re, err := regexp.Compile(cond.Condition)
 				if err != nil {
-					server.Logger.Error("Could not compile regex for qlrx_msg_regex.", zap.Error(err))
+					server.Logger.Error("Could not compile regex for qlrx_msg_regex.",
+						zap.Error(err),
+						zap.String("condition", cond.Condition),
+					)
 					return false
 				}
 
@@ -100,26 +103,38 @@ func main() {
 				// first split the condition
 				condElms := strings.Split(cond.Condition, "|")
 				if len(condElms) != 2 {
-					server.Logger.Error("qlrx_idx_regex has the wrong number of elements, should be 2 (idx|regex)")
+					server.Logger.Error("qlrx_idx_regex has the wrong number of elements, should be 2 (idx|regex)",
+						zap.String("condition", cond.Condition),
+						zap.Strings("condition_elms", condElms),
+					)
 					return false
 				}
 
 				// convert second elm to int
 				idx, err := strconv.Atoi(condElms[1])
 				if err != nil {
-					server.Logger.Error("can not convert qlrx_idx_regex idx to int. (should be idx|regex)")
+					server.Logger.Error("can not convert qlrx_idx_regex idx to int. (should be idx|regex)",
+						zap.String("condition", cond.Condition),
+						zap.Strings("condition_elms", condElms),
+					)
 					return false
 				}
 
 				// is index in range?
 				if idx > len(*elms) {
-					server.Logger.Error("qlrx_idx_regex - index is greater than the number of elements in the message.")
+					server.Logger.Error("qlrx_idx_regex - index is greater than the number of elements in the message.",
+						zap.String("condition", cond.Condition),
+						zap.Strings("condition_elms", condElms),
+					)
 					return false
 				}
 
 				re, err := regexp.Compile(condElms[1])
 				if err != nil {
-					server.Logger.Error("Could not compile regex for qlrx_idx_regex.", zap.Error(err))
+					server.Logger.Error("Could not compile regex for qlrx_idx_regex.", zap.Error(err),
+						zap.String("condition", cond.Condition),
+						zap.Strings("condition_elms", condElms),
+					)
 					return false
 				}
 
@@ -135,7 +150,9 @@ func main() {
 				// convert second elm to int
 				idx, err := strconv.Atoi(cond.Condition)
 				if err != nil {
-					server.Logger.Error("condition must be in integer for qlrx_idx_count_gt and qlrx_idx_count_lt.")
+					server.Logger.Error("condition must be in integer for qlrx_idx_count_gt and qlrx_idx_count_lt.",
+						zap.String("condition", cond.Condition),
+					)
 					return false
 				}
 
@@ -173,8 +190,15 @@ func main() {
 		msgData := buf[:bufLen]
 		server.Logger.Info("Messages received", zap.ByteString("message", msgData))
 
+		// message must end with $
+		msgStr := strings.TrimSpace(string(msgData))
+		if msgStr[len(msgStr)-1:] != "$" {
+			server.Logger.Warn("message did not terminate with a $")
+			return
+		}
+
 		// may receive multiple messages
-		msgs := strings.Split(strings.TrimSpace(string(msgData)), "$")
+		msgs := strings.Split(msgStr, "$")
 		msgResp := make([]MsgResp, len(msgs)-1)
 
 		// parse each message
