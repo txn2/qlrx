@@ -101,7 +101,8 @@ func main() {
 			// index regex
 			if cond.Parser == "qlrx_idx_regex" {
 				// first split the condition
-				condElms := strings.Split(cond.Condition, "|")
+				sep := regexp.MustCompile("|")
+				condElms := sep.Split(cond.Condition, 2)
 				if len(condElms) != 2 {
 					server.Logger.Error("qlrx_idx_regex has the wrong number of elements, should be 2 (idx|regex)",
 						zap.String("parser", cond.Parser),
