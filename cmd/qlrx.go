@@ -206,6 +206,12 @@ func main() {
 
 		// message must end with $
 		msgStr := strings.TrimSpace(string(msgData))
+
+		if len(msgStr) < 2 {
+			server.Logger.Warn("empty message", zap.ByteString("msgData", msgData))
+			return
+		}
+
 		if msgStr[len(msgStr)-1:] != "$" {
 			server.Logger.Warn("message did not terminate with a $")
 			return
