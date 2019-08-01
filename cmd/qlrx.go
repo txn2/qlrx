@@ -253,7 +253,10 @@ func main() {
 			// Get asset
 			asset, err := qlApi.GetAsset(*provisionService, *assetIdPrefix, msgResp[i].Id)
 			if err != nil {
-				server.Logger.Warn("Unable to retrieve asset related to message.", zap.Error(err))
+				server.Logger.Warn("Unable to retrieve asset related to message.",
+					zap.Error(err),
+					zap.String("asset", msgResp[i].Id),
+				)
 				continue
 			}
 
@@ -285,7 +288,11 @@ func main() {
 				// [base_model]_[MSG_TYPE]_[PROTOCOL]
 				model, err := qlApi.GetModel(*modelService, modelPrefix, modelId)
 				if err != nil {
-					server.Logger.Warn("Unable to retrieve model related to asset.", zap.Error(err))
+					server.Logger.Warn("Unable to retrieve model related to asset.",
+						zap.Error(err),
+						zap.String("model_id", modelId),
+						zap.String("asset", msgResp[i].Id),
+					)
 					continue
 				}
 

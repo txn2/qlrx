@@ -151,7 +151,11 @@ func (a *Api) GetAsset(provisionService string, assetIdPrefix string, id string)
 
 	if res.StatusCode == 404 {
 		err = errors.New("asset not found")
-		a.Logger.Warn("Provisioning returned 404.", zap.Error(err))
+		a.Logger.Warn("Provisioning returned 404.",
+			zap.String("asset_id_prefix", assetIdPrefix),
+			zap.String("asset_id", id),
+			zap.Error(err),
+		)
 		return nil, err
 	}
 
