@@ -11,9 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/txn2/provision"
-
 	"github.com/txn2/micro"
+	"github.com/txn2/provision"
 	"github.com/txn2/qlrx"
 	"go.uber.org/zap"
 )
@@ -112,7 +111,7 @@ func main() {
 					return false
 				}
 
-				// convert second elm to int
+				// convert to int
 				idx, err := strconv.Atoi(condElms[0])
 				if err != nil {
 					server.Logger.Error("can not convert qlrx_idx_regex idx to int. (should be idx|regex)",
@@ -131,7 +130,7 @@ func main() {
 					return false
 				}
 
-				re, err := regexp.Compile(condElms[1])
+				re, err := regexp.Compile(condElms[1][1:])
 				if err != nil {
 					server.Logger.Error("Could not compile regex for qlrx_idx_regex.", zap.Error(err),
 						zap.String("condition", cond.Condition),
@@ -140,7 +139,8 @@ func main() {
 					return false
 				}
 
-				if re.MatchString(*msg) == false {
+				msgElements := *elms
+				if re.MatchString(msgElements[idx]) == false {
 					return false
 				}
 
